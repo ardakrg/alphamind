@@ -17,9 +17,15 @@ def init_db(db_path: str = DB_PATH):
                        market_id TEXT,
                        market_question TEXT,
                        market_yes_price REAL,
+                       market_yes_bid REAL,
+                       market_yes_ask REAL,
+                       market_volume_24h REAL,
+                       market_liquidity REAL,
                        llm_probability REAL,
                        llm_confidence REAL,
+                       pricing_delay REAL,
                        delta REAL,
+                       weighted_delta REAL,
                        direction TEXT,
                        reasoning TEXT
                        )
@@ -42,8 +48,11 @@ def store_alert(alert: dict, db_path: str = DB_PATH):
         INSERT INTO alerts (
             timestamp, news_source, news_title, news_url,
             market_id, market_question, market_yes_price,
-            llm_probability, llm_confidence, delta, direction, reasoning
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            market_yes_bid, market_yes_ask,
+            market_volume_24h, market_liquidity,
+            llm_probability, llm_confidence, pricing_delay, 
+            delta, weighted_delta, direction, reasoning
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             alert["timestamp"],
             alert["news_source"],
@@ -52,9 +61,15 @@ def store_alert(alert: dict, db_path: str = DB_PATH):
             alert["market_id"],
             alert["market_question"],
             alert["market_yes_price"],
+            alert["market_yes_bid"],
+            alert["market_yes_ask"],
+            alert["market_volume_24h"],
+            alert["market_liquidity"],
             alert["llm_probability"],
             alert["llm_confidence"],
+            alert["pricing_delay"],
             alert["delta"],
+            alert["weighted_delta"],
             alert["direction"],
             alert["reasoning"]
         )
@@ -116,9 +131,15 @@ if __name__ == "__main__":
         "market_id": "12345",
         "market_question": "Will oil hit $100 by November?",
         "market_yes_price": 0.14,
+        "market_yes_bid": 0.13,
+        "market_yes_ask": 0.15,
+        "market_volume_24h": 25000.0,
+        "market_liquidity": 5000.0,
         "llm_probability": 0.35,
         "llm_confidence": 0.7,
+        "pricing_delay": 0.8,
         "delta": 0.21,
+        "weighted_delta": 0.1176,
         "direction": "buy_yes",
         "reasoning": "Test reasoning.",
     }

@@ -3,3 +3,4 @@ feedparser
 sentence-transformers
 anthropic
 python-dotenv
+rich
