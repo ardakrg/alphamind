@@ -1,0 +1,147 @@
+import sqlite3
+from datetime import datetime
+
+DB_PATH= "alphamind.db"
+
+def init_db(db_path: str = DB_PATH):
+    """Create the alerts and market_price_history tables if they don't exist."""
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("""CREATE TABLE IF NOT EXISTS alerts (
+                       id INTEGER PRIMARY KEY AUTOINCREMENT,
+                       timestamp TEXT NOT NULL,
+                       news_source TEXT,
+                       news_title TEXT,
+                       news_url TEXT,
+                       market_id TEXT,
+                       market_question TEXT,
+                       market_yes_price REAL,
+                       llm_probability REAL,
+                       llm_confidence REAL,
+                       delta REAL,
+                       direction TEXT,
+                       reasoning TEXT
+                       )
+                       """)
+        cursor.execute("""CREATE TABLE IF NOT EXISTS market_price_history (
+                       id INTEGER PRIMARY KEY,
+                       market_id TEXT,
+                       timestamp TEXT,
+                       yes_bid REAL,
+                       yes_ask REAL,
+                       yes_probability REAL
+                       )
+                       """)
+        
+def store_alert(alert: dict, db_path: str = DB_PATH):
+    """Insert an alert into the alerts table."""
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+        INSERT INTO alerts (
+            timestamp, news_source, news_title, news_url,
+            market_id, market_question, market_yes_price,
+            llm_probability, llm_confidence, delta, direction, reasoning
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            alert["timestamp"],
+            alert["news_source"],
+            alert["news_title"],
+            alert["news_url"],
+            alert["market_id"],
+            alert["market_question"],
+            alert["market_yes_price"],
+            alert["llm_probability"],
+            alert["llm_confidence"],
+            alert["delta"],
+            alert["direction"],
+            alert["reasoning"]
+        )
+        )
+
+def store_market_prices(markets: list[dict], db_path: str = DB_PATH):
+    """Insert current market prices into the price history table."""
+    timestamp = datetime.now().isoformat()
+
+    rows = [
+        (
+            market["id"],
+            timestamp,
+            market["yes_bid"],
+            market["yes_ask"],
+            market["yes_probability"],
+        )
+        for market in markets
+    ]
+
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.executemany("""
+            INSERT INTO market_price_history (
+                market_id, timestamp, yes_bid, yes_ask, yes_probability
+                           ) VALUES (?, ?, ?, ?, ?)
+        """, rows)
+
+
+def get_recent_alerts(limit: int = 20, db_path: str = DB_PATH) -> list[dict]:
+    """Fetch the most recent alerts, newest first."""
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM alerts ORDER BY timestamp DESC LIMIT ?",
+            (limit,)
+        )
+        rows = cursor.fetchall()
+        return [dict(row) for row in rows]
+
+if __name__ == "__main__":
+    import os
+
+    TEST_DB = "test_alphamind.db"
+
+    # Clean slate
+    if os.path.exists(TEST_DB):
+        os.remove(TEST_DB)
+
+    init_db(TEST_DB)
+    print(f"Test database initialized at {TEST_DB}")
+
+    fake_alert = {
+        "timestamp": datetime.now().isoformat(),
+        "news_source": "BBC World",
+        "news_title": "Test: Iran threatens to close Strait of Hormuz",
+        "news_url": "https://example.com/test",
+        "market_id": "12345",
+        "market_question": "Will oil hit $100 by November?",
+        "market_yes_price": 0.14,
+        "llm_probability": 0.35,
+        "llm_confidence": 0.7,
+        "delta": 0.21,
+        "direction": "buy_yes",
+        "reasoning": "Test reasoning.",
+    }
+    store_alert(fake_alert, TEST_DB)
+    print("Stored a test alert")
+
+    fake_markets = [
+        {"id": "12345", "yes_bid": 0.13, "yes_ask": 0.15, "yes_probability": 0.14},
+        {"id": "67890", "yes_bid": 0.50, "yes_ask": 0.52, "yes_probability": 0.51},
+    ]
+    store_market_prices(fake_markets, TEST_DB)
+    print(f"Stored {len(fake_markets)} market price snapshots")
+
+    alerts = get_recent_alerts(limit=5, db_path=TEST_DB)
+    print(f"\nRead back {len(alerts)} alerts:")
+    for a in alerts:
+        print(f"  [{a['timestamp']}] {a['news_title']}")
+        print(f"     market: {a['market_yes_price']}, llm: {a['llm_probability']}, delta: {a['delta']}")
+
+    # Cleanup
+    os.remove(TEST_DB)
+    print(f"\nRemoved {TEST_DB}")
+
+    # Initialize the real DB (empty, ready for use)
+    init_db()
+    print(f"Real database initialized at {DB_PATH}")
