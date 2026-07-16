@@ -1,19 +1,7 @@
-import json
-import anthropic
-from dotenv import load_dotenv
+from llm_utils import get_client, parse_llm_json
 from config import MATCHER_MODEL
 from datetime import datetime
 
-load_dotenv()
-
-_client = None
-
-def get_client() -> anthropic.Anthropic:
-    """Lazy-load the Anhtropic client"""
-    global _client
-    if _client is None:
-        _client = anthropic.Anthropic()
-    return _client
 
 def build_prompt(news: dict, markets: list[dict]) -> str:
     """Build the match-verification prompt"""
@@ -60,20 +48,6 @@ Respond with ONLY a JSON object and no other text:
     
     return prompt
 
-def parse_llm_json(text: str) -> dict | None:
-    """Extract and parse JSON from an LLM response, tolerating code fences."""
-    text = text.strip()
-
-    if text.startswith("```"):
-        lines = text.split("\n")
-        text = "\n".join(lines[1:-1])
-    
-    try:
-        text_json = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-
-    return text_json
 
 def verify_matches(news:dict, candidates: list[tuple[dict, float]]) -> list[dict]:
     """Ask the LLM which candidate markets are actually affected by this news."""
