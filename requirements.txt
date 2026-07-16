@@ -1,3 +1,5 @@
 requests
 feedparser
 sentence-transformers
+anthropic
+python-dotenv
