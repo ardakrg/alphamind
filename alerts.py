@@ -1,5 +1,5 @@
 from config import MIN_DELTA
-from datetime import datetime
+from datetime import datetime, timezone
 from rich.console import Console
 from rich.panel import Panel
 
@@ -23,7 +23,7 @@ def evaluate_alert(news:dict, market:dict, impact: dict) -> dict | None:
         direction = "buy_no"
     
     return {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "news_source": news["source"],
         "news_title": news["title"],
         "news_url": news["url"],
@@ -47,6 +47,8 @@ def display_alert(alert: dict):
     """Print an alert to the terminal in a readable format."""
     color = "green" if alert["direction"] == "buy_yes" else "red"
     arrow = "▲" if alert["direction"] == "buy_yes" else "▼"
+    local_time = datetime.fromisoformat(alert["timestamp"]).astimezone()
+
 
     warning = ""
     if alert["market_liquidity"] < 5000 or alert["market_volume_24h"] < 1000:
@@ -78,7 +80,7 @@ def display_alert(alert: dict):
     console.print(Panel(
         body,
         title=f"[bold {color}]ALERT[/bold {color}]",
-        subtitle=f"[dim]{alert['timestamp'][:16].replace('T', ' ')}[/dim]",
+        subtitle=f"[dim]{local_time.strftime('%Y-%m-%d %H:%M')}[/dim]",
         border_style=color,
         padding=(1, 2),
     ))
@@ -86,7 +88,7 @@ def display_alert(alert: dict):
 
 if __name__ == "__main__":
     fake_alert = {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "news_source": "BBC World",
         "news_title": "Iran threatens to close Strait of Hormuz",
         "news_url": "https://example.com/test",

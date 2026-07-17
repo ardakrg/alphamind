@@ -1,4 +1,6 @@
 import feedparser
+import calendar
+from datetime import datetime, timezone
 
 FEEDS = {
     "BBC World": "https://feeds.bbci.co.uk/news/world/rss.xml",
@@ -16,6 +18,15 @@ def fetch_feed(source_name: str, url: str) -> list[dict]:
     news = []
 
     for entry in parsed.entries:
+        published_parsed = entry.get("published_parsed")
+        if published_parsed:
+            published_dt = datetime.fromtimestamp(
+                calendar.timegm(published_parsed),
+                tz=timezone.utc
+            )
+        else:
+            published_dt = None
+
         news_entry = {
             "id": entry.get("id"),
             "source": source_name,
@@ -23,6 +34,7 @@ def fetch_feed(source_name: str, url: str) -> list[dict]:
             "summary": entry.get("summary"),
             "url": entry.get("link"),
             "published": entry.get("published"),
+            "published_dt": published_dt,
         }
         news.append(news_entry)
     
@@ -53,3 +65,5 @@ if __name__ == "__main__":
     print(f"Fetched {len(news)} unique news items")
     for item in news[:5]:   # first 5
         print(f"[{item['source']}] {item['title']}")
+        print(f"  published:    {item['published']}")
+        print(f"  published_dt: {item['published_dt']}")

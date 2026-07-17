@@ -20,12 +20,12 @@ def fetch_polymarket_markets(limit: int = 100, min_volume: float = 10000, min_li
         if yes_bid is None or yes_ask is None:
             continue
 
-        no_bid = round(1 - yes_ask)
-        no_ask = round(1- yes_bid)
+        no_bid = round(1 - yes_ask, 4)
+        no_ask = round(1- yes_bid, 4)
 
         yes_probability = (yes_bid + yes_ask) / 2
         url = f"https://polymarket.com/event/{market.get('slug')}"
-        volume24hr = market.get("volume24hr")
+        volume24h = market.get("volume24hr")
         liquidity = market.get("liquidityNum")
         question = market.get("question")
         market_id = market.get("id")
@@ -38,7 +38,7 @@ def fetch_polymarket_markets(limit: int = 100, min_volume: float = 10000, min_li
             "no_bid": no_bid,
             "no_ask": no_ask,
             "yes_probability": yes_probability,
-            "volume_24hr": volume24hr,
+            "volume_24h": volume24h,
             "liquidity": liquidity,
             "url": url,
         }

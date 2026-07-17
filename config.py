@@ -12,3 +12,7 @@ MIN_DELTA = 0.1
 # Fetch intervals (seconds)
 MARKET_REFRESH_INTERVAL = 300   # 5 min
 NEWS_CHECK_INTERVAL = 120       # 2 min
+
+# Initial market fetching
+INITIAL_LOOKBACK_HOURS = 1
+MARKET_FETCH_LIMIT = 200

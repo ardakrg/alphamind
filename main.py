@@ -1,0 +1,113 @@
+import asyncio
+from datetime import datetime, timezone, timedelta
+from config import (
+    MARKET_FETCH_LIMIT,
+    MARKET_REFRESH_INTERVAL,
+    NEWS_CHECK_INTERVAL,
+    TOP_K_CANDIDATES,
+    MIN_SIMILARITY,
+    INITIAL_LOOKBACK_HOURS,
+)
+from fetchers.polymarket import fetch_polymarket_markets
+from fetchers.news import fetch_all_news
+from matcher.embedder import embed_texts
+from matcher.candidates import find_candidates
+from matcher.llm_matcher import verify_matches
+from analyzer.impact import analyze_impact
+from alerts import evaluate_alert, display_alert
+from storage import init_db, store_alert, store_market_prices
+
+market_list = []
+market_embeddings = None
+seen_news_ids = set()
+
+async def market_updater():
+    """Fetches market infos and embededs them into vectors"""
+    global market_list, market_embeddings
+    while True:
+        try:
+            markets = fetch_polymarket_markets(limit=MARKET_FETCH_LIMIT)
+            store_market_prices(markets)
+            
+            embeddings = embed_texts([m["question"] for m in markets])
+
+            market_list = markets
+            market_embeddings = embeddings
+
+            print(f"Loaded {len(markets)} markets.")
+        except Exception as e:
+            print(f"Market update failed: {e}")
+
+        await asyncio.sleep(MARKET_REFRESH_INTERVAL)
+
+async def process_news(news: dict):
+    """Run the full pipeline for a single news item."""
+    if market_embeddings is None:
+        return
+    
+    print(f"Processing: [{news['source']}] {news['title'][:70]}")
+    
+    text = news["title"] + " " + (news["summary"] or "")
+    news_vec = embed_texts([text])[0]
+
+    # Find the most semantically similar corpus items to a query vector.
+    candidates = find_candidates(news_vec, market_embeddings, market_list,
+                                 top_k=TOP_K_CANDIDATES, min_similarity=MIN_SIMILARITY)
+    if not candidates:
+        return
+    
+    # Ask the LLM which candidate markets are actually affected by this news.
+    relevant = verify_matches(news, candidates)
+    if not relevant:
+        return
+    
+    # impact analysis for every market using LLM
+    for market in relevant:
+        impact = analyze_impact(news, market)
+        if impact is None:
+            continue
+
+        alert = evaluate_alert(news, market, impact)
+        if alert:
+            display_alert(alert)
+            store_alert(alert)
+
+async def news_watcher():
+    """Poll RSS feeds and process news items we haven't seen yet."""
+    global seen_news_ids
+    first_run = True
+
+    while True:
+        try:
+            news_items = fetch_all_news()
+
+            if first_run:
+                cutoff = datetime.now(timezone.utc) - timedelta(INITIAL_LOOKBACK_HOURS)
+                for n in news_items:
+                    seen_news_ids.add(n["id"])
+                    if n["published_dt"] and n["published_dt"] > cutoff:
+                        await process_news(n)
+                first_run = False
+                print(f"Initial scan done. Watching {len(seen_news_ids)} known items.")
+            else:
+                for n in news_items:
+                    if n["id"] not in seen_news_ids:
+                        seen_news_ids.add(n["id"])
+                        await process_news(n)
+
+        except Exception as e:
+            print(f"News check failed: {e}")
+
+        await asyncio.sleep(NEWS_CHECK_INTERVAL)
+
+async def main():
+    init_db()
+    print("Starting alphamind...")
+    await asyncio.gather(market_updater(), news_watcher())
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nStopped.")

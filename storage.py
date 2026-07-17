@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 
 DB_PATH= "alphamind.db"
 
@@ -77,7 +77,7 @@ def store_alert(alert: dict, db_path: str = DB_PATH):
 
 def store_market_prices(markets: list[dict], db_path: str = DB_PATH):
     """Insert current market prices into the price history table."""
-    timestamp = datetime.now().isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
 
     rows = [
         (
@@ -124,7 +124,7 @@ if __name__ == "__main__":
     print(f"Test database initialized at {TEST_DB}")
 
     fake_alert = {
-        "timestamp": datetime.now().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "news_source": "BBC World",
         "news_title": "Test: Iran threatens to close Strait of Hormuz",
         "news_url": "https://example.com/test",
