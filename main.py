@@ -44,9 +44,7 @@ async def process_news(news: dict):
     """Run the full pipeline for a single news item."""
     if market_embeddings is None:
         return
-    
-    print(f"Processing: [{news['source']}] {news['title'][:70]}")
-    
+        
     text = news["title"] + " " + (news["summary"] or "")
     news_vec = embed_texts([text])[0]
 
@@ -55,10 +53,14 @@ async def process_news(news: dict):
                                  top_k=TOP_K_CANDIDATES, min_similarity=MIN_SIMILARITY)
     if not candidates:
         return
+
+    print(f"\n{'─' * 70}")
+    print(f"[{news['source']}] {news['title'][:60]}")
     
     # Ask the LLM which candidate markets are actually affected by this news.
     relevant = verify_matches(news, candidates)
     if not relevant:
+        print("   → no relevant markets")
         return
     
     # impact analysis for every market using LLM
@@ -66,6 +68,11 @@ async def process_news(news: dict):
         impact = analyze_impact(news, market)
         if impact is None:
             continue
+
+        print(f"    [impact] {market['question'][:45]}")
+        print(f"             p={impact['new_probability']:.2f}  "
+              f"conf={impact['confidence']:.2f}  "
+              f"delay={impact['market_pricing_delay']:.2f}")
 
         alert = evaluate_alert(news, market, impact)
         if alert:

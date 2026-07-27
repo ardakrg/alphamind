@@ -4,7 +4,7 @@ ANALYZER_MODEL = "claude-sonnet-5" # for reasoning
 
 # Matching thresholds
 TOP_K_CANDIDATES = 5
-MIN_SIMILARITY = 0.1
+MIN_SIMILARITY = 0.25
 
 # Alert threshold
 MIN_DELTA = 0.1
