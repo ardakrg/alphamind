@@ -1,17 +1,44 @@
 import requests
+from config import MARKET_FETCH_LIMIT
+import time
 
-def fetch_polymarket_markets(limit: int = 100, min_volume: float = 10000, min_liquidity: float = 1000) -> list[dict]:
+def fetch_polymarket_markets(limit: int = MARKET_FETCH_LIMIT, min_liquidity: float = 1000, order: str = "volume24hr",) -> list[dict]:
     gamma_url = "https://gamma-api.polymarket.com/markets"
-    response = requests.get(gamma_url, params={
-        "limit": limit,
-        "volume_num_min": min_volume,
-        "liquidity_num_min": min_liquidity,
-        "closed": "false",
+    page_size = 100
+    raw = []
+    offset = 0
+    max_retries = 3
+
+    while len(raw) < limit:
+        response = requests.get(gamma_url, params={
+            "limit": page_size,
+            "offset": offset,
+            "closed": "false",
+            "liquidity_num_min": min_liquidity,
+            "order": order,
+            "ascending": "false",
         })
-    markets = response.json()
+
+        if response.status_code == 429:
+            if max_retries <= 0:
+                print("Too many rate limits, stopping")
+                break
+            max_retries -= 1
+            print("Rate limited, backing off")
+            time.sleep(5)
+            continue
+        
+        page = response.json()
+        if not page:
+            break
+        raw.extend(page)
+        offset += page_size
+        time.sleep(0.3)   # be polite to the API
+
+    
     results = []
 
-    for market in markets:
+    for market in raw:
         if market.get("active") != True or market.get("closed") != False:
             continue
 
@@ -49,7 +76,11 @@ def fetch_polymarket_markets(limit: int = 100, min_volume: float = 10000, min_li
 
 
 if __name__ == "__main__":
-    markets = fetch_polymarket_markets(limit=10)
-    print(f"Fetched {len(markets)} markets")
+    markets = fetch_polymarket_markets(limit=300)
     for m in markets:
-        print(m)
+        q = m["question"].lower()
+        if "iran" in q or "oil" in q or "hormuz" in q:
+            print(f"  {m['question'][:60]}  liq={m['liquidity']:.0f} vol={m['volume_24h']:.0f}")
+    print(f"Fetched {len(markets)} markets")
+    for m in markets[:5]:
+        print(f"  liq={m['liquidity']:.0f} vol={m['volume_24h']:.0f}  {m['question'][:50]}")
