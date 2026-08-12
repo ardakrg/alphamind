@@ -16,6 +16,7 @@ from matcher.llm_matcher import verify_matches
 from analyzer.impact import analyze_impact
 from alerts import evaluate_alert, display_alert
 from storage import init_db, store_alert, store_market_prices
+from notifier import send_telegram_alert
 
 market_list = []
 market_embeddings = None
@@ -77,6 +78,7 @@ async def process_news(news: dict):
         alert = evaluate_alert(news, market, impact)
         if alert:
             display_alert(alert)
+            send_telegram_alert(alert)
             store_alert(alert)
 
 async def news_watcher():
