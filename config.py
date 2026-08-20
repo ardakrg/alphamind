@@ -8,6 +8,7 @@ MIN_SIMILARITY = 0.25
 
 # Alert threshold
 MIN_DELTA = 0.1
+MIN_PRICING_DELAY = 0.4
 
 # Fetch intervals (seconds)
 MARKET_REFRESH_INTERVAL = 300   # 5 min

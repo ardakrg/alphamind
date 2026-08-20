@@ -71,9 +71,9 @@ async def process_news(news: dict):
             continue
 
         print(f"    [impact] {market['question'][:45]}")
-        print(f"             p={impact['new_probability']:.2f}  "
-              f"conf={impact['confidence']:.2f}  "
-              f"delay={impact['market_pricing_delay']:.2f}")
+        print(f"            p={impact['new_probability']:.2f}  conf={impact['confidence']:.2f}  "
+            f"delay={impact['market_pricing_delay']:.2f}  "
+            f"delta={impact['new_probability'] - market['yes_probability']:+.2f}")
 
         alert = evaluate_alert(news, market, impact)
         if alert:

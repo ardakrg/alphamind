@@ -1,4 +1,4 @@
-from config import MIN_DELTA
+from config import MIN_DELTA, MIN_PRICING_DELAY
 from datetime import datetime, timezone
 from rich.console import Console
 from rich.panel import Panel
@@ -11,8 +11,11 @@ def evaluate_alert(news:dict, market:dict, impact: dict) -> dict | None:
         return None
     
     delta = impact["new_probability"] - market["yes_probability"]
-    weighted_delta = delta * impact["confidence"] * impact["market_pricing_delay"]
 
+    if impact["market_pricing_delay"] < MIN_PRICING_DELAY:
+        return None
+
+    weighted_delta = delta * impact["confidence"]
     if abs(weighted_delta) < MIN_DELTA:
         return None
     
