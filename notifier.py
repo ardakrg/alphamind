@@ -1,11 +1,52 @@
 import os
 import requests
 from dotenv import load_dotenv
+from datetime import datetime, timezone
 
 load_dotenv()
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+def send_telegram_status(stats:dict, market_count:int):
+    """Send a daily health summary."""
+    if not TELEGRAM_CHAT_ID or  not TELEGRAM_TOKEN:
+        return
+
+    uptime = datetime.now(timezone.utc) - stats["started_at"]
+    days = uptime.days
+    hours = uptime.seconds // 3600
+
+    if stats["news_processed"] == 0 or market_count == 0:
+        emoji = "🔴"
+    elif stats["errors"] > 10:
+        emoji = "🟡"
+    else:
+        emoji = "🟢"
+
+    text = (
+        f"{emoji} *alphamind daily report*\n\n"
+        f"Uptime: {days}d {hours}h\n"
+        f"Markets tracked: {market_count}\n"
+        f"News processed: {stats['news_processed']}\n"
+        f"Matched by LLM: {stats['matched']}\n"
+        f"Impact analyses: {stats['impact_analyses']}\n"
+        f"Alerts: {stats['alerts']}\n\n"
+        f"Errors: {stats['errors']}\n"
+        f"Last error: {stats['last_error'] or 'none'}"
+    )
+
+    try:
+        requests.post( f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                    json={
+                        "chat_id": TELEGRAM_CHAT_ID,
+                        "text": text,
+                        "parse_mode": "Markdown",
+                    },
+                    timeout=10,)
+    except Exception as e:
+        print(f"Telegram heartbeat failed: {e}")
+
 
 def send_telegram_alert(alert: dict):
     """Send an alert to Telegram. Fails silently if not configured or on error."""
