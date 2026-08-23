@@ -8,6 +8,13 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+def esc(s) -> str:
+    """Escape the three characters Telegram's HTML parser cares about."""
+    return (str(s)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
 def send_telegram_status(stats:dict, market_count:int):
     """Send a daily health summary."""
     if not TELEGRAM_CHAT_ID or  not TELEGRAM_TOKEN:
@@ -25,7 +32,7 @@ def send_telegram_status(stats:dict, market_count:int):
         emoji = "🟢"
 
     text = (
-        f"{emoji} *alphamind daily report*\n\n"
+        f"{emoji} <b>alphamind daily report</b>\n\n"
         f"Uptime: {days}d {hours}h\n"
         f"Markets tracked: {market_count}\n"
         f"News processed: {stats['news_processed']}\n"
@@ -33,17 +40,19 @@ def send_telegram_status(stats:dict, market_count:int):
         f"Impact analyses: {stats['impact_analyses']}\n"
         f"Alerts: {stats['alerts']}\n\n"
         f"Errors: {stats['errors']}\n"
-        f"Last error: {stats['last_error'] or 'none'}"
+        f"Last error: {esc(stats['last_error'] or 'none')}"
     )
 
     try:
-        requests.post( f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+        response = requests.post( f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                     json={
                         "chat_id": TELEGRAM_CHAT_ID,
                         "text": text,
-                        "parse_mode": "Markdown",
+                        "parse_mode": "HTML",
                     },
                     timeout=10,)
+        if response.status_code != 200:
+            print(f"Telegram rejected message: {response.status_code} {response.text}")
     except Exception as e:
         print(f"Telegram heartbeat failed: {e}")
 
@@ -61,33 +70,36 @@ def send_telegram_alert(alert: dict):
         warning = "\n⚠ Thin market — price may be stale, your order could move it.\n"
 
     text = (
-        f"{emoji} *ALERT*\n\n"
-        f"*{alert['market_question']}*\n\n"
+        f"{emoji} <b>ALERT</b>\n\n"
+        f"<b>{esc(alert['market_question'])}</b>\n\n"
         f"Market says   ${alert['market_yes_price']:.2f} ({alert['market_yes_price']:.0%})  "
         f"bid ${alert['market_yes_bid']:.2f} / ask ${alert['market_yes_ask']:.2f}\n"
         f"LLM says      ${alert['llm_probability']:.2f} ({alert['llm_probability']:.0%})\n"
         f"Delta         {alert['delta']:+.2f}   weighted {alert['weighted_delta']:+.2f}\n\n"
-        f"{arrow} *{alert['direction'].replace('_', ' ').upper()}*\n\n"
+        f"{arrow} <b>{alert['direction'].replace('_', ' ').upper()}</b>\n\n"
         f"confidence {alert['llm_confidence']:.2f}   not-yet-priced-in {alert['pricing_delay']:.2f}\n"
         f"24h volume ${alert['market_volume_24h']:,.0f}   liquidity ${alert['market_liquidity']:,.0f}\n"
         f"{warning}\n"
         f"─────\n\n"
-        f"Triggered by _{alert['news_source']}_\n"
-        f"{alert['news_title']}\n\n"
-        f"{alert['reasoning']}\n\n"
-        f"{alert['news_url']}"
+        f"Triggered by <i>{esc(alert['news_source'])}</i>\n"
+        f"{esc(alert['news_title'])}\n\n"
+        f"{esc(alert['reasoning'])}\n\n"
+        f"{esc(alert['news_url'])}"
     )
 
     try:
-        requests.post(
+        response = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
             json={
                 "chat_id": TELEGRAM_CHAT_ID,
                 "text": text,
-                "parse_mode": "Markdown",
+                "parse_mode": "HTML",
             },
             timeout=10,
         )
+        if response.status_code != 200:
+            print(f"Telegram rejected message: {response.status_code} {response.text}")
+
     except Exception as e:
         print(f"Telegram send failed: {e}")
 
