@@ -1,63 +1,11 @@
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from rich.console import Console
 from rich.table import Table
-from config import SNAPSHOT_TOLERANCE_MINUTES
-from storage import get_recent_alerts, get_price_history
-
-HORIZONS = [("+1h", timedelta(hours=1)), ("+6h", timedelta(hours=6)), ("+24h", timedelta(hours=24))]
-FLAT_THRESHOLD = 0.005   # moves smaller than this count as no move
+from storage import get_recent_alerts
+from evaluation import HORIZONS, evaluate_alert_moves
 
 console = Console()
-
-def nearest_snapshot(history: list[dict], target: datetime, tolerance: timedelta) -> dict | None:
-    """Snapshot closest to target, or None if none is within tolerance."""
-    best = None
-    best_gap = tolerance
-    for snap in history:
-        gap = abs(datetime.fromisoformat(snap["timestamp"]) - target)
-        if gap <= best_gap:
-            best = snap
-            best_gap = gap
-    return best
-
-def evaluate_alert_moves(alert: dict, now: datetime) -> dict:
-    """Price at each horizon and whether it moved in the alert's direction.
-
-    Returns {label: None} for horizons with no data yet, otherwise
-    {label: {"price": p, "move": p - alert_price, "result": "hit" | "miss" | "flat"}}.
-    """
-    alert_time = datetime.fromisoformat(alert["timestamp"])
-    tolerance = timedelta(minutes=SNAPSHOT_TOLERANCE_MINUTES)
-
-    # one query covering all horizons
-    history = get_price_history(
-        alert["market_id"],
-        (alert_time + HORIZONS[0][1] - tolerance).isoformat(),
-        (alert_time + HORIZONS[-1][1] + tolerance).isoformat(),
-    )
-
-    results = {}
-    for label, offset in HORIZONS:
-        target = alert_time + offset
-        snap = nearest_snapshot(history, target, tolerance) if target <= now else None
-        if snap is None:
-            results[label] = None
-            continue
-
-        price = snap["yes_probability"]
-        move = price - alert["market_yes_price"]
-        signed_move = move if alert["direction"] == "buy_yes" else -move
-
-        if abs(move) < FLAT_THRESHOLD:
-            result = "flat"
-        elif signed_move > 0:
-            result = "hit"
-        else:
-            result = "miss"
-
-        results[label] = {"price": price, "move": move, "result": result}
-    return results
 
 def format_cell(outcome: dict | None) -> str:
     if outcome is None:
@@ -103,8 +51,8 @@ def print_report(limit: int = 100):
     console.print(table)
 
     for label, c in counts.items():
-        decided = c["hit"] + c["miss"]
-        rate = f"{c['hit'] / decided:.0%}" if decided else "n/a"
+        scored = c["hit"] + c["miss"] + c["flat"]
+        rate = f"{c['hit'] / scored:.0%}" if scored else "n/a"
         console.print(f"  {label:>5}  [green]✓ {c['hit']}[/green]  [red]✗ {c['miss']}[/red]  "
                       f"[dim]= {c['flat']}[/dim]   moved toward LLM: {rate}")
 

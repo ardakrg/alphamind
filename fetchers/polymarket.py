@@ -1,3 +1,4 @@
+import json
 import requests
 from config import MARKET_FETCH_LIMIT
 import time
@@ -75,8 +76,8 @@ def fetch_polymarket_markets(limit: int = MARKET_FETCH_LIMIT, min_liquidity: flo
     return results
 
 
-def fetch_market_by_id(market_id: str) -> dict | None:
-    """Fetch a single market. None if it doesn't exist, is closed, or has no order book."""
+def _get_market_raw(market_id: str) -> dict | None:
+    """Raw Gamma response for one market, or None if it doesn't exist."""
     url = f"https://gamma-api.polymarket.com/markets/{market_id}"
     max_retries = 3
 
@@ -94,8 +95,44 @@ def fetch_market_by_id(market_id: str) -> dict | None:
         return None
     response.raise_for_status()
 
-    return _standardize(response.json())
+    return response.json()
 
+def fetch_market_by_id(market_id: str) -> dict | None:
+    """Fetch a single market. None if it doesn't exist, is closed, or has no order book."""
+    market = _get_market_raw(market_id)
+    if market is None:
+        return None
+    return _standardize(market)
+
+def fetch_market_status(market_id: str) -> dict | None:
+    """Closed/resolved status of a market. None if it doesn't exist.
+
+    final_yes_price is the resolved price of the first outcome (1, 0, or 0.5 for 50-50),
+    and outcome is the winning outcome's name ("50-50" if split). Both are None until resolved.
+    """
+    market = _get_market_raw(market_id)
+    if market is None:
+        return None
+
+    closed = market.get("closed") == True
+    resolved = closed and market.get("umaResolutionStatus") == "resolved"
+    final_yes_price = None
+    outcome = None
+
+    if resolved:
+        # both are JSON-encoded strings, e.g. '["Yes", "No"]' and '["1", "0"]'
+        outcomes = json.loads(market.get("outcomes") or "[]")
+        prices = [float(p) for p in json.loads(market.get("outcomePrices") or "[]")]
+        if prices:
+            final_yes_price = prices[0]
+            outcome = outcomes[prices.index(1.0)] if 1.0 in prices else "50-50"
+
+    return {
+        "closed": closed,
+        "resolved": resolved,
+        "final_yes_price": final_yes_price,
+        "outcome": outcome,
+    }
 
 if __name__ == "__main__":
     markets = fetch_polymarket_markets(limit=300)
@@ -112,3 +149,7 @@ if __name__ == "__main__":
     print(f"\nfetch_market_by_id({open_id}): {fetch_market_by_id(open_id)}")
     print(f"fetch_market_by_id(540817) [closed]: {fetch_market_by_id('540817')}")
     print(f"fetch_market_by_id(999999999) [missing]: {fetch_market_by_id('999999999')}")
+    print(f"fetch_market_status({open_id}): {fetch_market_status(open_id)}")
+    print(f"fetch_market_status(540817) [resolved 50-50]: {fetch_market_status('540817')}")
+    print(f"fetch_market_status(4781790) [resolved Yes]: {fetch_market_status('4781790')}")
+    print(f"fetch_market_status(4840850) [resolved, named outcomes]: {fetch_market_status('4840850')}")

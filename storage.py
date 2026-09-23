@@ -139,6 +139,32 @@ def get_price_history(market_id: str, start: str, end: str, db_path: str = DB_PA
         )
         return [dict(row) for row in cursor.fetchall()]
 
+def get_alerts_since(since: str, db_path: str = DB_PATH) -> list[dict]:
+    """All alerts at or after an ISO timestamp, oldest first."""
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT * FROM alerts WHERE timestamp >= ? ORDER BY timestamp",
+            (since,)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+def get_latest_price(market_id: str, since: str, db_path: str = DB_PATH) -> dict | None:
+    """Most recent price snapshot for a market at or after an ISO timestamp."""
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT timestamp, yes_bid, yes_ask, yes_probability
+               FROM market_price_history
+               WHERE market_id = ? AND timestamp >= ?
+               ORDER BY timestamp DESC LIMIT 1""",
+            (market_id, since)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
 if __name__ == "__main__":
     import os
 
@@ -198,6 +224,10 @@ if __name__ == "__main__":
         TEST_DB,
     )
     print(f"Price history for 12345: {history}")
+
+    since = (now - timedelta(hours=24)).isoformat()
+    print(f"Alerts in last 24h: {len(get_alerts_since(since, TEST_DB))}")
+    print(f"Latest price for 12345: {get_latest_price('12345', since, TEST_DB)}")
 
     # Cleanup
     os.remove(TEST_DB)

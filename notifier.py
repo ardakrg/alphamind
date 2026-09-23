@@ -104,6 +104,90 @@ def send_telegram_alert(alert: dict):
         print(f"Telegram send failed: {e}")
 
 
+TELEGRAM_MAX_LENGTH = 4096
+
+def _format_report_alert(e: dict) -> str:
+    """One alert's block in the end-of-day report."""
+    alert = e["alert"]
+    status = e["status"]
+    icon = {"hit": "✅", "miss": "❌", "flat": "➖", "too_early": "⏳", "no_data": "❔"}[e["result"]]
+    direction = alert["direction"].replace("_", " ").upper()
+
+    if e["price"] is None:
+        price_line = f"At alert {alert['market_yes_price']:.2f} → no price data yet"
+    elif status is not None and status["resolved"]:
+        price_line = (f"At alert {alert['market_yes_price']:.2f} → resolved <b>{esc(status['outcome'])}</b> "
+                      f"({e['price']:.2f}, {e['move']:+.2f})")
+    else:
+        price_line = f"At alert {alert['market_yes_price']:.2f} → now {e['price']:.2f} ({e['move']:+.2f})"
+
+    lines = [
+        f"{icon} <b>{esc(alert['market_question'])}</b>",
+        f"{direction} · LLM {alert['llm_probability']:.2f} · {e['age_hours']:.1f}h ago",
+        price_line,
+    ]
+    if e["result"] == "too_early":
+        lines.append("<i>too early to judge</i>")
+    if status is not None and status["closed"] and not status["resolved"]:
+        lines.append("<i>market closed, awaiting resolution</i>")
+    return "\n".join(lines)
+
+def build_alert_report(evaluations: list[dict]) -> list[str]:
+    """Format the end-of-day report as one or more messages, split between alerts."""
+    scored = [e for e in evaluations if e["result"] in ("hit", "miss", "flat")]
+    hits = sum(1 for e in scored if e["result"] == "hit")
+    too_early = sum(1 for e in evaluations if e["result"] == "too_early")
+
+    header = (
+        f"📊 <b>Alert report, last 24h</b>\n\n"
+        f"<b>{hits} of {len(scored)}</b> alerts moved toward the LLM estimate"
+    )
+    if too_early:
+        header += f"\n{too_early} too early to judge"
+
+    # pack whole alert blocks into messages, leaving room for a "(1/2)" footer
+    limit = TELEGRAM_MAX_LENGTH - 20
+    messages = []
+    current = header
+    for block in [_format_report_alert(e) for e in evaluations]:
+        if len(current) + 2 + len(block) > limit:
+            messages.append(current)
+            current = block
+        else:
+            current += "\n\n" + block
+    messages.append(current)
+
+    if len(messages) > 1:
+        messages = [f"{m}\n\n({i}/{len(messages)})" for i, m in enumerate(messages, 1)]
+    return messages
+
+def send_telegram_report(messages: list[str]) -> bool:
+    """Send the end-of-day report messages in order. Returns False if any failed."""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return True
+
+    ok = True
+    for text in messages:
+        try:
+            response = requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                json={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "text": text,
+                    "parse_mode": "HTML",
+                },
+                timeout=10,
+            )
+            if response.status_code != 200:
+                print(f"Telegram rejected message: {response.status_code} {response.text}")
+                ok = False
+
+        except Exception as e:
+            print(f"Telegram report failed: {e}")
+            ok = False
+    return ok
+
+
 if __name__ == "__main__":
     fake_alert = {
         "market_question": "Will oil hit $100 by November?",

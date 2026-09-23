@@ -18,6 +18,7 @@ from analyzer.impact import analyze_impact
 from alerts import evaluate_alert, display_alert
 from storage import init_db, store_alert, store_market_prices, get_watchlist_market_ids
 from notifier import send_telegram_alert, send_telegram_status
+from evaluation import send_alert_report
 
 market_list = []
 market_embeddings = None
@@ -147,15 +148,19 @@ async def news_watcher():
 
         await asyncio.sleep(NEWS_CHECK_INTERVAL)
 
+async def sleep_until(hour: int, minute: int):
+    """Sleep until the next HH:MM UTC."""
+    now = datetime.now(timezone.utc)
+    next_run = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if next_run <= now:
+        next_run += timedelta(days=1)
+    await asyncio.sleep((next_run - now).total_seconds())
+
 async def daily_report():
     """Send a dialy heartbeat to Telegram"""
     while True:
-        now = datetime.now(timezone.utc)
-        next_run = now.replace(hour=11, minute=6, second=0, microsecond=0)
-        if next_run <= now:
-            next_run += timedelta(days=1)
-        await asyncio.sleep((next_run - now).total_seconds())
-        
+        await sleep_until(11, 6)
+
         try:
             send_telegram_status(stats, len(market_list))
         except Exception as e:
@@ -169,10 +174,26 @@ async def daily_report():
         stats["last_error"] = None
         stats["errors"] = 0
 
+async def alert_report():
+    """Send the end-of-day report on how today's alerts played out."""
+    while True:
+        await sleep_until(18, 0)
+
+        try:
+            messages = send_alert_report()
+            if messages:
+                print(f"Alert report sent ({len(messages)} messages).")
+            else:
+                print("No alerts in the last 24h, alert report skipped.")
+        except Exception as e:
+            stats["errors"] += 1
+            stats["last_error"] = f"{datetime.now(timezone.utc).strftime('%H:%M')} {e}"
+            print(f"Alert report failed: {e}")
+
 async def main():
     init_db()
     print("Starting alphamind...")
-    await asyncio.gather(market_updater(), news_watcher(), daily_report(),)
+    await asyncio.gather(market_updater(), news_watcher(), daily_report(), alert_report(),)
 
 
 if __name__ == "__main__":
