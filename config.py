@@ -17,3 +17,7 @@ NEWS_CHECK_INTERVAL = 120       # 2 min
 # Initial market fetching
 INITIAL_LOOKBACK_HOURS = 1
 MARKET_FETCH_LIMIT = 500
+
+# Alert evaluation
+WATCHLIST_HOURS = 48              # keep storing prices for alerted markets this long after the alert
+SNAPSHOT_TOLERANCE_MINUTES = 15   # max distance between a horizon (+1h/+6h/+24h) and the snapshot used for it

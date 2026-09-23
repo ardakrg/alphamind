@@ -7,15 +7,16 @@ from config import (
     TOP_K_CANDIDATES,
     MIN_SIMILARITY,
     INITIAL_LOOKBACK_HOURS,
+    WATCHLIST_HOURS,
 )
-from fetchers.polymarket import fetch_polymarket_markets
+from fetchers.polymarket import fetch_polymarket_markets, fetch_market_by_id
 from fetchers.news import fetch_all_news
 from matcher.embedder import embed_texts
 from matcher.candidates import find_candidates
 from matcher.llm_matcher import verify_matches
 from analyzer.impact import analyze_impact
 from alerts import evaluate_alert, display_alert
-from storage import init_db, store_alert, store_market_prices
+from storage import init_db, store_alert, store_market_prices, get_watchlist_market_ids
 from notifier import send_telegram_alert, send_telegram_status
 
 market_list = []
@@ -32,20 +33,36 @@ stats = {
     "errors": 0,
 }
 
+def fetch_watchlist_markets(exclude_ids: set) -> list[dict]:
+    """Fetch recently alerted markets that aren't already in the top-volume list."""
+    markets = []
+    for market_id in get_watchlist_market_ids(WATCHLIST_HOURS):
+        if market_id in exclude_ids:
+            continue
+        try:
+            market = fetch_market_by_id(market_id)
+        except Exception as e:
+            print(f"Watchlist fetch failed for {market_id}: {e}")
+            continue
+        if market is not None:   # None = closed or gone, nothing to store
+            markets.append(market)
+    return markets
+
 async def market_updater():
     """Fetches market infos and embededs them into vectors"""
     global market_list, market_embeddings
     while True:
         try:
             markets = fetch_polymarket_markets(limit=MARKET_FETCH_LIMIT)
-            store_market_prices(markets)
+            watchlist = fetch_watchlist_markets({m["id"] for m in markets})
+            store_market_prices(markets + watchlist)
             
             embeddings = embed_texts([m["question"] for m in markets])
 
             market_list = markets
             market_embeddings = embeddings
 
-            print(f"Loaded {len(markets)} markets.")
+            print(f"Loaded {len(markets)} markets (+{len(watchlist)} from watchlist).")
         except Exception as e:
             stats["errors"] += 1
             stats["last_error"] = f"{datetime.now(timezone.utc).strftime('%H:%M')} {e}"

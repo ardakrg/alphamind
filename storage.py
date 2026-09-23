@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 DB_PATH= "alphamind.db"
 
@@ -39,7 +39,10 @@ def init_db(db_path: str = DB_PATH):
                        yes_probability REAL
                        )
                        """)
-        
+        cursor.execute("""CREATE INDEX IF NOT EXISTS idx_price_history_market_time
+                       ON market_price_history (market_id, timestamp)
+                       """)
+
 def store_alert(alert: dict, db_path: str = DB_PATH):
     """Insert an alert into the alerts table."""
     with sqlite3.connect(db_path) as conn:
@@ -111,6 +114,31 @@ def get_recent_alerts(limit: int = 20, db_path: str = DB_PATH) -> list[dict]:
         rows = cursor.fetchall()
         return [dict(row) for row in rows]
 
+def get_watchlist_market_ids(hours: int, db_path: str = DB_PATH) -> list[str]:
+    """Market ids that had an alert in the last `hours` hours."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT DISTINCT market_id FROM alerts WHERE timestamp >= ?",
+            (cutoff,)
+        )
+        return [row[0] for row in cursor.fetchall()]
+
+def get_price_history(market_id: str, start: str, end: str, db_path: str = DB_PATH) -> list[dict]:
+    """Price snapshots for one market between two ISO timestamps, oldest first."""
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT timestamp, yes_bid, yes_ask, yes_probability
+               FROM market_price_history
+               WHERE market_id = ? AND timestamp BETWEEN ? AND ?
+               ORDER BY timestamp""",
+            (market_id, start, end)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
 if __name__ == "__main__":
     import os
 
@@ -158,6 +186,18 @@ if __name__ == "__main__":
     for a in alerts:
         print(f"  [{a['timestamp']}] {a['news_title']}")
         print(f"     market: {a['market_yes_price']}, llm: {a['llm_probability']}, delta: {a['delta']}")
+
+    watchlist = get_watchlist_market_ids(hours=48, db_path=TEST_DB)
+    print(f"\nWatchlist (last 48h): {watchlist}")
+
+    now = datetime.now(timezone.utc)
+    history = get_price_history(
+        "12345",
+        (now - timedelta(hours=1)).isoformat(),
+        (now + timedelta(hours=1)).isoformat(),
+        TEST_DB,
+    )
+    print(f"Price history for 12345: {history}")
 
     # Cleanup
     os.remove(TEST_DB)
