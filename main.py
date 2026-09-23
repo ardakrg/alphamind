@@ -109,7 +109,7 @@ async def news_watcher():
             news_items = fetch_all_news()
 
             if first_run:
-                cutoff = datetime.now(timezone.utc) - timedelta(INITIAL_LOOKBACK_HOURS)
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=INITIAL_LOOKBACK_HOURS)
                 for n in news_items:
                     seen_news_ids.add(n["id"])
                     if n["published_dt"] and n["published_dt"] > cutoff:
@@ -149,7 +149,7 @@ async def daily_report():
         stats["matched"] = 0
         stats["impact_analyses"] = 0
         stats["alerts"] = 0
-        stats["last_error"] = f"{datetime.now(timezone.utc).strftime('%H:%M')} {e}"
+        stats["last_error"] = None
         stats["errors"] = 0
 
 async def main():
