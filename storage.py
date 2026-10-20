@@ -150,6 +150,20 @@ def get_alerts_since(since: str, db_path: str = DB_PATH) -> list[dict]:
         )
         return [dict(row) for row in cursor.fetchall()]
 
+def get_last_alert(market_id: str, since: str, db_path: str = DB_PATH) -> dict | None:
+    """Most recent alert for a market at or after an ISO timestamp."""
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        cursor.execute(
+            """SELECT * FROM alerts
+               WHERE market_id = ? AND timestamp >= ?
+               ORDER BY timestamp DESC LIMIT 1""",
+            (market_id, since)
+        )
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
 def get_latest_price(market_id: str, since: str, db_path: str = DB_PATH) -> dict | None:
     """Most recent price snapshot for a market at or after an ISO timestamp."""
     with sqlite3.connect(db_path) as conn:

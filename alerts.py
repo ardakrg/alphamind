@@ -1,7 +1,8 @@
-from config import MIN_DELTA, MIN_PRICING_DELAY
-from datetime import datetime, timezone
+from config import MIN_DELTA, MIN_PRICING_DELAY, MAX_DELTA, REALERT_WINDOW_HOURS, REALERT_MIN_CHANGE
+from datetime import datetime, timezone, timedelta
 from rich.console import Console
 from rich.panel import Panel
+from storage import DB_PATH, get_last_alert
 
 console = Console()
 
@@ -44,7 +45,37 @@ def evaluate_alert(news:dict, market:dict, impact: dict) -> dict | None:
         "weighted_delta": weighted_delta,
         "direction": direction,
         "reasoning": impact["reasoning"],
+        "web_search_failed": bool(impact.get("web_search_failed")),   # shown in the alert, not stored
     }
+
+def suppression_reason(alert: dict, db_path: str = DB_PATH) -> str | None:
+    """Last checks on an alert that passed evaluate_alert. Returns a log line saying why
+    it must not be sent, or None to send it.
+
+    Re-alert check first: a market alerted within REALERT_WINDOW_HOURS only alerts again
+    if the direction flipped or the LLM estimate moved by at least REALERT_MIN_CHANGE.
+    Deviation guard last: an estimate more than MAX_DELTA from the market price is
+    rejected as a likely misread of the news or the question.
+    """
+    now = datetime.fromisoformat(alert["timestamp"])
+    since = (now - timedelta(hours=REALERT_WINDOW_HOURS)).isoformat()
+    last = get_last_alert(alert["market_id"], since, db_path)
+    if last is not None:
+        flipped = last["direction"] != alert["direction"]
+        change = alert["llm_probability"] - last["llm_probability"]
+        if not flipped and abs(change) < REALERT_MIN_CHANGE:
+            age_hours = (now - datetime.fromisoformat(last["timestamp"])).total_seconds() / 3600
+            return (f"[repeat-suppressed] market={alert['market_id']} "
+                    f"old_llm={last['llm_probability']:.2f} ({age_hours:.1f}h ago) "
+                    f"new_llm={alert['llm_probability']:.2f} change={change:+.2f} "
+                    f"dir={alert['direction']} | {alert['market_question']}")
+
+    if abs(alert["delta"]) > MAX_DELTA:
+        return (f"[deviation-guard] market={alert['market_id']} "
+                f"price={alert['market_yes_price']:.3f} llm={alert['llm_probability']:.3f} "
+                f"delta={alert['delta']:+.2f} > {MAX_DELTA:.2f} | {alert['market_question']}")
+
+    return None
 
 def display_alert(alert: dict):
     """Print an alert to the terminal in a readable format."""
@@ -59,6 +90,9 @@ def display_alert(alert: dict):
             "\n[yellow]⚠ Thin market — the price may be stale, and your own order "
             "could move it. Check the book before acting.[/yellow]\n"
         )
+    if alert.get("web_search_failed"):
+        warning += ("\n[yellow]⚠ Web search failed — the LLM could not verify the current state; "
+                    "estimate is from the news alone.[/yellow]\n")
 
     body = f"""[bold]{alert['market_question']}[/bold]
 

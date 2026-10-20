@@ -2,6 +2,7 @@ import os
 import requests
 from dotenv import load_dotenv
 from datetime import datetime, timezone
+from llm_utils import usage_cost
 
 load_dotenv()
 
@@ -15,8 +16,24 @@ def esc(s) -> str:
             .replace("<", "&lt;")
             .replace(">", "&gt;"))
 
-def send_telegram_status(stats:dict, market_count:int):
-    """Send a daily health summary."""
+def format_usage(usage: dict) -> str:
+    """Token and cost lines per model for the daily report."""
+    if not usage:
+        return "No LLM calls"
+    lines = []
+    total = 0.0
+    for model, t in sorted(usage.items()):
+        cost = usage_cost(model, t)
+        total += cost or 0
+        searches = f", {t['web_searches']} searches" if t["web_searches"] else ""
+        cost_text = f"${cost:.2f}" if cost is not None else "price unknown"
+        lines.append(f"{esc(model)}: {t['calls']} calls, {t['input_tokens']:,} in / "
+                     f"{t['output_tokens']:,} out{searches} → {cost_text}")
+    lines.append(f"<b>Total: ${total:.2f}</b>")
+    return "\n".join(lines)
+
+def send_telegram_status(stats:dict, market_count:int, usage: dict):
+    """Send a daily health summary, including LLM token usage and cost."""
     if not TELEGRAM_CHAT_ID or  not TELEGRAM_TOKEN:
         return
 
@@ -38,7 +55,9 @@ def send_telegram_status(stats:dict, market_count:int):
         f"News processed: {stats['news_processed']}\n"
         f"Matched by LLM: {stats['matched']}\n"
         f"Impact analyses: {stats['impact_analyses']}\n"
+        f"Verified with web search: {stats['search_verifications']}\n"
         f"Alerts: {stats['alerts']}\n\n"
+        f"<b>LLM usage</b>\n{format_usage(usage)}\n\n"
         f"Errors: {stats['errors']}\n"
         f"Last error: {esc(stats['last_error'] or 'none')}"
     )
@@ -68,6 +87,8 @@ def send_telegram_alert(alert: dict):
     warning = ""
     if alert["market_liquidity"] < 5000 or alert["market_volume_24h"] < 1000:
         warning = "\n⚠ Thin market — price may be stale, your order could move it.\n"
+    if alert.get("web_search_failed"):
+        warning += "\n⚠ <b>Web search failed</b> — the LLM could not verify the current state; estimate is from the news alone.\n"
 
     text = (
         f"{emoji} <b>ALERT</b>\n\n"

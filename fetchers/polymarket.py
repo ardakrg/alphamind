@@ -1,6 +1,7 @@
 import json
 import requests
-from config import MARKET_FETCH_LIMIT
+from config import MARKET_FETCH_LIMIT, DESCRIPTION_MAX_CHARS
+from llm_utils import truncate_middle
 import time
 
 def _standardize(market: dict) -> dict | None:
@@ -22,6 +23,7 @@ def _standardize(market: dict) -> dict | None:
     return {
         "id": market.get("id"),
         "question": market.get("question"),
+        "description": truncate_middle((market.get("description") or "").strip(), DESCRIPTION_MAX_CHARS),
         "yes_bid": yes_bid,
         "yes_ask": yes_ask,
         "no_bid": no_bid,

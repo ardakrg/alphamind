@@ -8,6 +8,7 @@ from config import (
     MIN_SIMILARITY,
     INITIAL_LOOKBACK_HOURS,
     WATCHLIST_HOURS,
+    ANALYSIS_COOLDOWN_HOURS,
 )
 from fetchers.polymarket import fetch_polymarket_markets, fetch_market_by_id
 from fetchers.news import fetch_all_news
@@ -15,24 +16,35 @@ from matcher.embedder import embed_texts
 from matcher.candidates import find_candidates
 from matcher.llm_matcher import verify_matches
 from analyzer.impact import analyze_impact
-from alerts import evaluate_alert, display_alert
+from alerts import evaluate_alert, suppression_reason, display_alert
 from storage import init_db, store_alert, store_market_prices, get_watchlist_market_ids
 from notifier import send_telegram_alert, send_telegram_status
 from evaluation import send_alert_report
+import llm_utils
 
 market_list = []
 market_embeddings = None
 seen_news_ids = set()
+last_analyzed = {}   # market_id -> UTC datetime of its last impact analysis (lost on restart)
 
 stats = {
     "started_at": datetime.now(timezone.utc),
     "news_processed": 0,
     "matched": 0,
     "impact_analyses": 0,
+    "search_verifications": 0,
     "alerts": 0,
     "last_error": None,
     "errors": 0,
 }
+
+def analysis_cooldown_left(market_id: str, now: datetime) -> timedelta | None:
+    """Time until a market may be analyzed again, or None if it isn't cooling down."""
+    analyzed_at = last_analyzed.get(market_id)
+    if analyzed_at is None:
+        return None
+    left = analyzed_at + timedelta(hours=ANALYSIS_COOLDOWN_HOURS) - now
+    return left if left > timedelta(0) else None
 
 def fetch_watchlist_markets(exclude_ids: set) -> list[dict]:
     """Fetch recently alerted markets that aren't already in the top-volume list."""
@@ -71,6 +83,12 @@ async def market_updater():
 
         await asyncio.sleep(MARKET_REFRESH_INTERVAL)
 
+def print_impact(label: str, market: dict, impact: dict):
+    print(f"    [impact:{label}] {market['question'][:45]}")
+    print(f"            p={impact['new_probability']:.2f}  conf={impact['confidence']:.2f}  "
+          f"delay={impact['market_pricing_delay']:.2f}  "
+          f"delta={impact['new_probability'] - market['yes_probability']:+.2f}")
+
 async def process_news(news: dict):
     """Run the full pipeline for a single news item."""
     if market_embeddings is None:
@@ -88,6 +106,21 @@ async def process_news(news: dict):
     print(f"\n{'─' * 70}")
     print(f"[{news['source']}] {news['title'][:60]}")
 
+    # Drop markets analyzed recently (same event from another feed). Done on the top-k,
+    # not the corpus, so a near-duplicate market can't slide into the freed slot.
+    now = datetime.now(timezone.utc)
+    fresh = []
+    for market, score in candidates:
+        left = analysis_cooldown_left(market["id"], now)
+        if left is None:
+            fresh.append((market, score))
+        else:
+            print(f"   [analysis-cooldown] market={market['id']} {left.total_seconds() / 3600:.1f}h left | {market['question'][:45]}")
+    candidates = fresh
+    if not candidates:
+        print("   → all candidates in analysis cooldown")
+        return
+
     stats["news_processed"] += 1
     
     # Ask the LLM which candidate markets are actually affected by this news.
@@ -98,20 +131,33 @@ async def process_news(news: dict):
 
     stats["matched"] += len(relevant)
     
-    # impact analysis for every market using LLM
+    # Two-pass impact analysis: a cheap pass from the news alone, then a web-search pass
+    # only for markets where the first pass would produce an alert.
     for market in relevant:
-        impact = analyze_impact(news, market)
+        last_analyzed[market["id"]] = datetime.now(timezone.utc)
+        impact = analyze_impact(news, market, with_search=False)
         if impact is None:
             continue
         stats["impact_analyses"] += 1
+        print_impact("news-only", market, impact)
 
-        print(f"    [impact] {market['question'][:45]}")
-        print(f"            p={impact['new_probability']:.2f}  conf={impact['confidence']:.2f}  "
-            f"delay={impact['market_pricing_delay']:.2f}  "
-            f"delta={impact['new_probability'] - market['yes_probability']:+.2f}")
+        if evaluate_alert(news, market, impact) is None:
+            continue
+
+        impact = analyze_impact(news, market, with_search=True)
+        if impact is None:
+            continue
+        stats["search_verifications"] += 1
+        print_impact("searched", market, impact)
 
         alert = evaluate_alert(news, market, impact)
-        if alert:
+        if alert is None:
+            print(f"    [search-dropped] market={market['id']} no longer passes the alert filters after search")
+        else:
+            reason = suppression_reason(alert)
+            if reason:
+                print(f"    {reason}")
+                continue
             stats["alerts"] += 1
             display_alert(alert)
             send_telegram_alert(alert)
@@ -162,7 +208,7 @@ async def daily_report():
         await sleep_until(11, 6)
 
         try:
-            send_telegram_status(stats, len(market_list))
+            send_telegram_status(stats, len(market_list), llm_utils.usage_totals)
         except Exception as e:
             stats["errors"] += 1
             print(f"Heartbeat failed: {e}")
@@ -170,9 +216,11 @@ async def daily_report():
         stats["news_processed"] = 0
         stats["matched"] = 0
         stats["impact_analyses"] = 0
+        stats["search_verifications"] = 0
         stats["alerts"] = 0
         stats["last_error"] = None
         stats["errors"] = 0
+        llm_utils.usage_totals.clear()
 
 async def alert_report():
     """Send the end-of-day report on how today's alerts played out."""

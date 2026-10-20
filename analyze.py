@@ -1,8 +1,8 @@
-import sys
+import argparse
 from datetime import datetime, timezone
 from rich.console import Console
 from rich.table import Table
-from storage import get_recent_alerts
+from storage import DB_PATH, get_recent_alerts, get_alerts_since
 from evaluation import HORIZONS, evaluate_alert_moves
 
 console = Console()
@@ -13,14 +13,23 @@ def format_cell(outcome: dict | None) -> str:
     mark = {"hit": "[green]✓[/green]", "miss": "[red]✗[/red]", "flat": "[dim]=[/dim]"}[outcome["result"]]
     return f"{outcome['price']:.2f} [dim]({outcome['move']:+.2f})[/dim] {mark}"
 
-def print_report(limit: int = 100):
-    alerts = get_recent_alerts(limit=limit)
+def rate(hits: int, total: int) -> str:
+    return f"{hits / total:.0%}" if total else "n/a"
+
+def print_report(limit: int = 100, since: str | None = None, db_path: str = DB_PATH):
+    if since:
+        since_iso = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc).isoformat()
+        alerts = get_alerts_since(since_iso, db_path)[::-1][:limit]   # newest first
+        title = f"Alert evaluation ({len(alerts)} most recent since {since} UTC)"
+    else:
+        alerts = get_recent_alerts(limit=limit, db_path=db_path)
+        title = f"Alert evaluation ({len(alerts)} most recent)"
     if not alerts:
         console.print("No alerts yet.")
         return
 
     now = datetime.now(timezone.utc)
-    table = Table(title=f"Alert evaluation ({len(alerts)} most recent)")
+    table = Table(title=title)
     table.add_column("Time")
     table.add_column("Market", max_width=45)
     table.add_column("Dir")
@@ -32,7 +41,7 @@ def print_report(limit: int = 100):
     counts = {label: {"hit": 0, "miss": 0, "flat": 0} for label, _ in HORIZONS}
 
     for alert in alerts:
-        outcomes = evaluate_alert_moves(alert, now)
+        outcomes = evaluate_alert_moves(alert, now, db_path)
         for label, outcome in outcomes.items():
             if outcome is not None:
                 counts[label][outcome["result"]] += 1
@@ -52,12 +61,18 @@ def print_report(limit: int = 100):
 
     for label, c in counts.items():
         scored = c["hit"] + c["miss"] + c["flat"]
-        rate = f"{c['hit'] / scored:.0%}" if scored else "n/a"
+        moved = c["hit"] + c["miss"]
         console.print(f"  {label:>5}  [green]✓ {c['hit']}[/green]  [red]✗ {c['miss']}[/red]  "
-                      f"[dim]= {c['flat']}[/dim]   moved toward LLM: {rate}")
+                      f"[dim]= {c['flat']}[/dim]   moved toward LLM: {rate(c['hit'], scored)} of all, "
+                      f"{rate(c['hit'], moved)} of the {moved} that moved")
 
 
 if __name__ == "__main__":
-    # usage: python analyze.py [number_of_alerts]
-    limit = int(sys.argv[1]) if len(sys.argv) > 1 else 100
-    print_report(limit)
+    # usage: python analyze.py [number_of_alerts] [--since YYYY-MM-DD] [--db PATH]
+    parser = argparse.ArgumentParser(description="Score past alerts against later price moves.")
+    parser.add_argument("limit", nargs="?", type=int, default=100, help="max alerts to show (default: %(default)s)")
+    parser.add_argument("--since", help="only alerts on or after this UTC date, YYYY-MM-DD")
+    parser.add_argument("--db", default=DB_PATH, help="database to read (default: %(default)s)")
+    args = parser.parse_args()
+
+    print_report(args.limit, args.since, args.db)

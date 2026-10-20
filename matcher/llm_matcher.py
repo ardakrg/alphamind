@@ -1,14 +1,17 @@
-from llm_utils import get_client, parse_llm_json
-from config import MATCHER_MODEL
-from datetime import datetime
+from llm_utils import get_client, extract_text, parse_llm_json, truncate_middle, record_usage
+from config import MATCHER_MODEL, MATCHER_DESCRIPTION_MAX_CHARS
+from datetime import datetime, timezone
 
 
 def build_prompt(news: dict, markets: list[dict]) -> str:
     """Build the match-verification prompt"""
-    today = datetime.now().strftime("%Y-%m-%d %H:%M")
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     market_lines = []
     for i, market in enumerate(markets, start=1):
         market_lines.append(f"{i}. {market['question']}")
+        description = truncate_middle(market.get("description") or "", MATCHER_DESCRIPTION_MAX_CHARS)
+        if description:
+            market_lines.append(f"   Resolution: {description}")
 
     market_list = "\n".join(market_lines)
 
@@ -22,13 +25,13 @@ Summary: {news['summary']}
 Source: {news['source']}
 Published: {news['published']}
 
-Candidate markets:
+Candidate markets (each with an excerpt of its resolution rules):
 {market_list}
 
 Task: identify which markets, if any, this news story materially affects.
 
 A market is affected only if this specific news changes the probability that the
-market resolves YES. Apply these rules:
+market resolves YES under its resolution rules. Apply these rules:
 - Sharing a topic, region, or named person is NOT enough.
 - A chain of speculative steps ("this might lead to X, which might lead to Y") is NOT enough.
 - If the news is old or already widely known, it likely changes nothing.
@@ -61,9 +64,11 @@ def verify_matches(news:dict, candidates: list[tuple[dict, float]]) -> list[dict
     response = client.messages.create(
         model = MATCHER_MODEL,
         max_tokens = 500,
+        thinking = {"type": "disabled"},  # Haiku 5.5 thinks by default; keep this a cheap one-shot classifier
         messages = [{"role": "user", "content": prompt}]
     )
-    text = response.content[0].text
+    record_usage(response)
+    text = extract_text(response)
     text_json = parse_llm_json(text)
     if text_json is None:
         return []
