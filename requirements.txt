@@ -1,6 +1,7 @@
-requests
-feedparser
-sentence-transformers
-anthropic
-python-dotenv
-rich
+anthropic>=0.116
+feedparser>=6.0
+numpy>=2.0
+python-dotenv>=1.0
+requests>=2.32
+rich>=13.0
+sentence-transformers>=5.0
